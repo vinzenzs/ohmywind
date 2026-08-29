@@ -15,15 +15,38 @@ on:
 # main -> prod Space, dev -> dev Space (resolved per-branch below). The HF_TOKEN
 # secret must have write access to BOTH Spaces (a single qdonnars user token does).
 jobs:
+  # Forks and self-hosted deployments (see deploy/) have no Space to mirror
+  # to. Without HF_TOKEN the whole workflow is a no-op instead of a red run
+  # on every push. Secrets are not readable from a job-level `if`, so a
+  # throwaway job turns "is it set" into an output the others can gate on.
+  preflight:
+    runs-on: ubuntu-latest
+    outputs:
+      enabled: ${{ steps.check.outputs.enabled }}
+    steps:
+      - id: check
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: |
+          if [ -n "${HF_TOKEN}" ]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::HF_TOKEN secret is not set, skipping the Hugging Face Space sync."
+          fi
+
   # Gate. The Space is a production surface and mirroring a broken commit to
   # it used to be entirely possible: nothing ran the suites before this push.
   # Calling the CI workflow rather than duplicating its steps keeps a single
   # definition of "green".
   ci:
+    needs: preflight
+    if: needs.preflight.outputs.enabled == 'true'
     uses: ./.github/workflows/ci.yml
 
   sync:
-    needs: ci
+    needs: [preflight, ci]
+    if: needs.preflight.outputs.enabled == 'true'
     runs-on: ubuntu-latest
     env:
       # Override via repo Variables → Actions if you renamed a Space.
