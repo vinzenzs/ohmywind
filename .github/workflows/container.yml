@@ -207,13 +207,18 @@ jobs:
             if curl -fsS http://localhost:8080/healthz >/dev/null 2>&1; then break; fi
             sleep 1
           done
-          curl -fsS http://localhost:8080/ | grep -q '<div id="root">'
+          # Downloads land in files first: `curl | grep -q` closes the pipe as
+          # soon as it matches and, under pipefail, curl's exit 23 fails the step.
+          curl -fsS -o /tmp/index.html http://localhost:8080/
+          grep -q '<div id="root">' /tmp/index.html
           # The backend URL really is compiled in.
-          curl -fsS http://localhost:8080/assets/$(curl -fsS http://localhost:8080/ | grep -o 'assets/index-[^"]*\.js' | head -1 | cut -d/ -f2) \
-            | grep -q "${WEB_API_BASE}"
+          ENTRY=$(grep -o 'assets/index-[^"]*\.js' /tmp/index.html | head -1)
+          curl -fsS -o /tmp/entry.js "http://localhost:8080/${ENTRY}"
+          grep -q "${WEB_API_BASE}" /tmp/entry.js
           [ "$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8080/confidentialite)" = "200" ]
           [ "$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8080/does-not-exist)" = "404" ]
-          curl -fsSI http://localhost:8080/sw.js | grep -qi 'cache-control: no-store'
+          curl -fsSI -o /tmp/sw.h http://localhost:8080/sw.js
+          grep -qi 'cache-control: no-store' /tmp/sw.h
           [ "$(docker exec web id -u)" = "101" ]
           docker rm -f web
 
