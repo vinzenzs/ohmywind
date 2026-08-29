@@ -62,11 +62,13 @@ from starlette.routing import Mount, Route
 from security import (
     ALLOWED_ORIGINS,
     TRUSTED_PROXY_HOPS,
+    ApiTokenMiddleware,
     RateLimitMiddleware,
     SecurityHeadersMiddleware,
     bucket_id,
     came_through_edge,
     forwarded_hop_count,
+    log_api_token_mode,
     trusted_hops_for,
     warn_if_edge_secret_missing,
 )
@@ -1081,7 +1083,9 @@ def build_app(mcp_app: Any) -> Starlette:
                 CORSMiddleware,
                 allow_origins=ALLOWED_ORIGINS,
                 allow_methods=["GET", "POST", "OPTIONS"],
-                allow_headers=["Content-Type"],
+                # Authorization: browser-based MCP clients send the bearer
+                # token (ApiTokenMiddleware) cross-origin.
+                allow_headers=["Content-Type", "Authorization"],
                 # Retry-After is set on our 429s, but a cross-origin fetch only
                 # sees the CORS-safelisted response headers unless the server
                 # opts the rest in here. Without this the web app cannot tell
@@ -1090,6 +1094,9 @@ def build_app(mcp_app: Any) -> Starlette:
                 expose_headers=["Retry-After"],
             ),
             Middleware(SecurityHeadersMiddleware),
+            # Inside CORS so a 401 still carries Access-Control-Allow-*, and
+            # before the limiter so unauthenticated probes cost nothing.
+            Middleware(ApiTokenMiddleware),
             Middleware(RateLimitMiddleware),
         ],
         lifespan=mcp_app.router.lifespan_context,
@@ -1099,6 +1106,7 @@ def build_app(mcp_app: Any) -> Starlette:
 def main() -> None:
     logging.basicConfig(level=logging.INFO)
     warn_if_edge_secret_missing()
+    log_api_token_mode()
     server = build_server()
     server.settings.transport_security = TransportSecuritySettings(
         enable_dns_rebinding_protection=True,

@@ -45,6 +45,16 @@ edgeSecret:
   # over .value.
   existingSecret: ""
 
+# Bearer token(s) required on /mcp (Authorization: Bearer <token>). Empty =
+# open endpoint. Comma-separate several tokens to rotate without downtime.
+# The REST routes and /healthz are never token-protected: the public web
+# bundle calls them, so a token there would ship in the JavaScript.
+auth:
+  token: ""
+  # Name of an existing Secret with key OPENWIND_API_TOKEN; takes precedence
+  # over .token.
+  existingSecret: ""
+
 # Tidal atlas dataset (MARC PREVIMER + SHOM C2D), mounted at /data/atlas.
 # Private and not redistributable, so it is never in the image: provide it
 # through a PVC you populate yourself. Disabled = Open-Meteo SMOC only.
@@ -133,3 +143,54 @@ readinessProbe:
 nodeSelector: {}
 tolerations: []
 affinity: {}
+
+# ------------------------------------------------------------------ web app
+# The static React bundle (packages/web) behind nginx, from
+# deploy/docker/Dockerfile.web. Optional: the upstream deployment serves it
+# from Cloudflare Pages instead. The backend URL is compiled into the bundle
+# at image build time (VITE_API_BASE), so the image must have been built for
+# the MCP host this release exposes.
+web:
+  enabled: false
+  replicaCount: 1
+  image:
+    repository: ghcr.io/qdonnars/ohmywind-web
+    pullPolicy: IfNotPresent
+    # Defaults to the chart's appVersion.
+    tag: ""
+  service:
+    type: ClusterIP
+    port: 80
+  ingress:
+    enabled: false
+    # Falls back to .Values.ingress.className when empty.
+    className: ""
+    annotations: {}
+    hosts:
+      - host: ohmywind.example.org
+        paths:
+          - path: /
+            pathType: Prefix
+    tls: []
+  resources:
+    requests:
+      cpu: 10m
+      memory: 32Mi
+    limits:
+      memory: 128Mi
+  podAnnotations: {}
+  podLabels: {}
+  securityContext:
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
+    capabilities:
+      drop: [ALL]
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 101
+    runAsGroup: 101
+    seccompProfile:
+      type: RuntimeDefault
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}

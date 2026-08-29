@@ -1,10 +1,16 @@
-# Build context for deploy/docker/Dockerfile is the repository root. Keep it
-# to the two Python libs and the server wrapper: everything else (web bundle,
-# node_modules, venvs, docs, caches) would only slow the context upload.
+# Build context for both deploy/docker/Dockerfile* is the repository root.
+# Keep it to what the two images need: the Python libs and server wrapper
+# for the MCP image, the web workspace for the web image.
 *
+!package.json
+!package-lock.json
 !packages/data-adapters/
 !packages/mcp-core/
 !packages/hf-space/
+!packages/web/
+!deploy/docker/nginx.conf
+**/node_modules/
+**/dist/
 **/.venv/
 **/__pycache__/
 **/.pytest_cache/
@@ -16,3 +22,5 @@ packages/hf-space/pyproject.toml
 packages/hf-space/.ruff.toml
 packages/hf-space/Dockerfile
 packages/hf-space/fetch_atlases.py
+packages/web/scripts/
+packages/web/test-results/

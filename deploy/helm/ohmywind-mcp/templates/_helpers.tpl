@@ -61,6 +61,48 @@ is configured at all.
 {{- end }}
 {{- end }}
 
+{{/*
+Name of the Secret holding OPENWIND_API_TOKEN, or "" when /mcp is open.
+*/}}
+{{- define "ohmywind-mcp.apiTokenSecretName" -}}
+{{- if .Values.auth.existingSecret }}
+{{- .Values.auth.existingSecret }}
+{{- else if .Values.auth.token }}
+{{- include "ohmywind-mcp.fullname" . }}
+{{- end }}
+{{- end }}
+
+{{/*
+True when the chart itself renders a Secret (any inline secret value given).
+*/}}
+{{- define "ohmywind-mcp.rendersSecret" -}}
+{{- if or (and .Values.edgeSecret.value (not .Values.edgeSecret.existingSecret)) (and .Values.auth.token (not .Values.auth.existingSecret)) }}true{{ end }}
+{{- end }}
+
 {{- define "ohmywind-mcp.atlasClaimName" -}}
 {{- default (printf "%s-atlas" (include "ohmywind-mcp.fullname" .)) .Values.atlas.existingClaim }}
+{{- end }}
+
+{{/*
+Web component: name, labels and image tag.
+*/}}
+{{- define "ohmywind-mcp.web.fullname" -}}
+{{- printf "%s-web" (include "ohmywind-mcp.fullname" .) | trunc 63 | trimSuffix "-" }}
+{{- end }}
+
+{{- define "ohmywind-mcp.web.selectorLabels" -}}
+app.kubernetes.io/name: {{ include "ohmywind-mcp.name" . }}-web
+app.kubernetes.io/instance: {{ .Release.Name }}
+{{- end }}
+
+{{- define "ohmywind-mcp.web.labels" -}}
+helm.sh/chart: {{ include "ohmywind-mcp.chart" . }}
+{{ include "ohmywind-mcp.web.selectorLabels" . }}
+app.kubernetes.io/component: web
+app.kubernetes.io/version: {{ include "ohmywind-mcp.web.imageTag" . | quote }}
+app.kubernetes.io/managed-by: {{ .Release.Service }}
+{{- end }}
+
+{{- define "ohmywind-mcp.web.imageTag" -}}
+{{- default .Chart.AppVersion .Values.web.image.tag }}
 {{- end }}

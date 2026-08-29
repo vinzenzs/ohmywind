@@ -17,7 +17,7 @@ The web app is **strictly standalone** — it never proposes "talk to an assista
 - `packages/data-adapters/` — Python lib, pure domain logic (marine data adapters, polars, routing, complexity)
 - `packages/mcp-core/` — Python lib, FastMCP server definition (cloud-agnostic, redeployable anywhere)
 - `packages/hf-space/` — Wrapper Hugging Face Spaces : app **Starlette + uvicorn** en Docker (aucun Gradio), porte la landing, les endpoints REST, CORS et le rate-limit. Servi aujourd'hui sur `qdonnars-openwind-mcp.hf.space` ; le passage à **mcp.ohmywind.fr** (Worker Cloudflare) est la phase B du plan de rebrand.
-- `deploy/` — Wrapper générique hors-HF : image OCI (`deploy/docker/Dockerfile`, contexte = racine du monorepo, publiée sur GHCR par `.github/workflows/container.yml`) et chart Helm (`deploy/helm/ohmywind-mcp`). Réutilise `hf-space/app.py` tel quel ; l'atlas de marée n'est pas dans l'image (volume `/data/atlas`).
+- `deploy/` — Wrapper générique hors-HF : images OCI (`deploy/docker/Dockerfile` = serveur, `Dockerfile.web` = bundle web derrière nginx avec `VITE_API_BASE` compilé au build ; contexte = racine du monorepo, publiées sur GHCR par `.github/workflows/container.yml`) et chart Helm (`deploy/helm/ohmywind-mcp`, composant `web.*` optionnel). Réutilise `hf-space/app.py` tel quel ; l'atlas de marée n'est pas dans l'image (volume `/data/atlas`). `deploy/docker/nginx.conf` doit rester aligné sur `packages/web/public/_headers` et `_redirects`.
 
 Plan d'exécution détaillé : `plan/` (local, non-tracké).
 
