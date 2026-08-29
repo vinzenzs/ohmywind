@@ -396,3 +396,99 @@ class SecurityHeadersMiddleware:
             await send(message)
 
         await self.app(scope, receive, send_with_headers)
+
+
+# ------------------------------------------------------------- API token
+
+# Bearer token(s) required on the MCP endpoint. Empty = open, which is what
+# the public Space runs. Comma-separated so a token can be rotated without a
+# window where every client is locked out: add the new one, roll the
+# clients, remove the old one.
+#
+# Only ``/mcp`` is covered, on purpose. The REST routes are called by the
+# web app, whose bundle is public: a token there would be a token in the
+# JavaScript, i.e. no token at all. Those routes stay behind the rate limit
+# and the edge secret instead.
+API_TOKENS = tuple(
+    t.strip() for t in os.environ.get("OPENWIND_API_TOKEN", "").split(",") if t.strip()
+)
+DEFAULT_PROTECTED_PREFIXES = ("/mcp",)
+
+
+def _bearer_token(scope: Scope) -> str | None:
+    for name, value in scope.get("headers", ()):
+        if name == b"authorization":
+            scheme, _, credentials = value.decode("latin-1").partition(" ")
+            if scheme.lower() == "bearer" and credentials.strip():
+                return credentials.strip()
+            return None
+    return None
+
+
+def token_is_valid(presented: str | None, *, tokens: Iterable[str] = API_TOKENS) -> bool:
+    """Constant-time comparison against every configured token."""
+    if presented is None:
+        return False
+    # No short-circuit: compare against all of them so timing does not leak
+    # which position matched.
+    matched = False
+    for token in tokens:
+        if hmac.compare_digest(presented, token):
+            matched = True
+    return matched
+
+
+class ApiTokenMiddleware:
+    """Require ``Authorization: Bearer <token>`` on the protected prefixes.
+
+    Inactive when no token is configured, so the same image serves both the
+    open public deployment and a private one. Preflight is never challenged:
+    an OPTIONS carries no credentials by design, and a 401 on it surfaces as
+    an opaque CORS failure rather than the real reason.
+    """
+
+    def __init__(
+        self,
+        app: ASGIApp,
+        *,
+        tokens: Iterable[str] = API_TOKENS,
+        protected_prefixes: Iterable[str] = DEFAULT_PROTECTED_PREFIXES,
+    ) -> None:
+        self.app = app
+        self._tokens = tuple(tokens)
+        self._prefixes = tuple(protected_prefixes)
+
+    def _is_protected(self, path: str) -> bool:
+        return any(path == p or path.startswith(p + "/") for p in self._prefixes)
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if (
+            not self._tokens
+            or scope["type"] != "http"
+            or scope.get("method") == "OPTIONS"
+            or not self._is_protected(scope.get("path", ""))
+        ):
+            await self.app(scope, receive, send)
+            return
+
+        if token_is_valid(_bearer_token(scope), tokens=self._tokens):
+            await self.app(scope, receive, send)
+            return
+
+        response = JSONResponse(
+            {"error": "missing or invalid API token"},
+            status_code=401,
+            headers={"WWW-Authenticate": 'Bearer realm="ohmywind-mcp"'},
+        )
+        await response(scope, receive, send)
+
+
+def log_api_token_mode() -> None:
+    """Say at startup whether /mcp is open or token-protected."""
+    if API_TOKENS:
+        _logger.info(
+            "/mcp requires a bearer token (%d configured via OPENWIND_API_TOKEN)",
+            len(API_TOKENS),
+        )
+    else:
+        _logger.info("OPENWIND_API_TOKEN unset: /mcp is open to any caller")
