@@ -4,6 +4,9 @@
 from __future__ import annotations
 
 import asyncio
+import json
+import math
+import re
 import time
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -277,7 +280,10 @@ class OpenMeteoAdapter:
             # fallback chain in ``estimate_passage`` can advance to the next
             # model without a 500.
             return WindSeries(model=model, points=())
-        return _parse_wind(resp.json(), model, start, end)
+        data = _decode_payload(resp)
+        if _is_off_coverage(data):
+            return WindSeries(model=model, points=())
+        return _parse_wind(data, model, start, end)
 
     async def _fetch_sea(
         self,
@@ -300,7 +306,10 @@ class OpenMeteoAdapter:
             _raise_for_status_with_horizon(resp, "open-meteo-marine", start)
         except _OffCoverageError:
             return SeaSeries(points=())
-        return _parse_sea(resp.json(), start, end)
+        data = _decode_payload(resp)
+        if _is_off_coverage(data):
+            return SeaSeries(points=())
+        return _parse_sea(data, start, end)
 
     # ---- batched multi-coordinate prewarm --------------------------------
     # A passage samples one (lat, lon) per segment; the per-segment ``fetch``
@@ -430,8 +439,13 @@ class OpenMeteoAdapter:
             # Whole batch off-coverage: empty series per point → per-segment
             # fallback chain advances, same as the single-point path.
             return [WindSeries(model=model, points=()) for _ in points]
-        elems = _as_coord_list(resp.json(), len(points))
-        return [_parse_wind(el, model, start, end) for el in elems]
+        elems = _as_coord_list(_decode_payload(resp), len(points))
+        return [
+            WindSeries(model=model, points=())
+            if _is_off_coverage(el)
+            else _parse_wind(el, model, start, end)
+            for el in elems
+        ]
 
     async def _fetch_sea_batch(
         self,
@@ -453,8 +467,11 @@ class OpenMeteoAdapter:
             _raise_for_status_with_horizon(resp, "open-meteo-marine", start)
         except _OffCoverageError:
             return [SeaSeries(points=()) for _ in points]
-        elems = _as_coord_list(resp.json(), len(points))
-        return [_parse_sea(el, start, end) for el in elems]
+        elems = _as_coord_list(_decode_payload(resp), len(points))
+        return [
+            SeaSeries(points=()) if _is_off_coverage(el) else _parse_sea(el, start, end)
+            for el in elems
+        ]
 
 
 def _error_reason(resp: httpx.Response) -> str:
@@ -565,6 +582,38 @@ def _slice_bundle(bundle: ForecastBundle, start: datetime, end: datetime) -> For
         sea=sliced_sea,
         requested_at=bundle.requested_at,
     )
+
+
+_BARE_NAN = re.compile(r"(?<=[:,\[\s])nan(?=[,\]}\s])")
+
+
+def _decode_payload(resp: httpx.Response) -> Any:
+    """Parse an Open-Meteo body, tolerating its non-standard ``nan`` literal.
+
+    For a point outside a regional model's domain (AROME France asked about
+    the Adriatic, say) Open-Meteo answers **200** with
+    ``{"latitude":nan,"longitude":nan,...}`` rather than the 400
+    ``"No data is available for this location"`` that
+    ``_raise_for_status_with_horizon`` knows how to translate. Bare ``nan`` is
+    not JSON (``json.loads`` accepts ``NaN``, not ``nan``), so ``resp.json()``
+    raised ``JSONDecodeError: Expecting value: line 1 column 13`` and the
+    fallback chain never got a chance to advance. Rewrite the literal to the
+    Python-accepted spelling, then let ``_is_off_coverage`` recognise the
+    result.
+    """
+    text = resp.text
+    try:
+        return json.loads(text)
+    except ValueError:
+        return json.loads(_BARE_NAN.sub("NaN", text))
+
+
+def _is_off_coverage(elem: Any) -> bool:
+    """True when an Open-Meteo element is the nan-coordinate "no data" shape."""
+    if not isinstance(elem, dict):
+        return False
+    lat = elem.get("latitude")
+    return isinstance(lat, float) and math.isnan(lat)
 
 
 def _as_coord_list(data: Any, n: int) -> list[dict[str, Any]]:
