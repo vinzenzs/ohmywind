@@ -44,9 +44,6 @@ concurrency:
 env:
   IMAGE: ghcr.io/${{ github.repository_owner }}/ohmywind-mcp
   WEB_IMAGE: ghcr.io/${{ github.repository_owner }}/ohmywind-web
-  # Compiled into the web bundle. Override per fork with a repo Variable
-  # (Settings → Actions → Variables) pointing at your own MCP host.
-  WEB_API_BASE: ${{ vars.WEB_API_BASE || 'https://mcp.ohmywind.fr' }}
   CHART_DIR: deploy/helm/ohmywind-mcp
 
 jobs:
@@ -190,7 +187,6 @@ jobs:
           load: true
           tags: ohmywind-web:smoke
           build-args: |
-            VITE_API_BASE=${{ env.WEB_API_BASE }}
             VERSION=${{ steps.meta.outputs.version }}
             VCS_REF=${{ github.sha }}
           cache-from: type=gha,scope=web
@@ -201,7 +197,12 @@ jobs:
       - name: Smoke test
         run: |
           set -euo pipefail
+          # No API_BASE must be a refusal to start, not a silent default.
+          if docker run --rm ohmywind-web:smoke >/dev/null 2>&1; then
+            echo "::error::web image started without API_BASE"; exit 1
+          fi
           docker run -d --name web --read-only --tmpfs /tmp --tmpfs /var/cache/nginx \
+            --tmpfs /usr/share/nginx/html:uid=101,gid=101 -e API_BASE=https://mcp.example.test \
             -p 8080:8080 ohmywind-web:smoke
           for i in $(seq 1 20); do
             if curl -fsS http://localhost:8080/healthz >/dev/null 2>&1; then break; fi
@@ -211,10 +212,11 @@ jobs:
           # soon as it matches and, under pipefail, curl's exit 23 fails the step.
           curl -fsS -o /tmp/index.html http://localhost:8080/
           grep -q '<div id="root">' /tmp/index.html
-          # The backend URL really is compiled in.
+          # The runtime URL is substituted in and the placeholder is gone.
           ENTRY=$(grep -o 'assets/index-[^"]*\.js' /tmp/index.html | head -1)
           curl -fsS -o /tmp/entry.js "http://localhost:8080/${ENTRY}"
-          grep -q "${WEB_API_BASE}" /tmp/entry.js
+          grep -q 'https://mcp.example.test' /tmp/entry.js
+          ! grep -q '__OHMYWIND_API_BASE__' /tmp/entry.js
           [ "$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8080/confidentialite)" = "200" ]
           [ "$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8080/does-not-exist)" = "404" ]
           curl -fsSI -o /tmp/sw.h http://localhost:8080/sw.js
@@ -233,7 +235,6 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           build-args: |
-            VITE_API_BASE=${{ env.WEB_API_BASE }}
             VERSION=${{ steps.meta.outputs.version }}
             VCS_REF=${{ github.sha }}
           cache-from: type=gha,scope=web
@@ -269,6 +270,7 @@ jobs:
             --set autoscaling.enabled=true \
             --set podDisruptionBudget.enabled=true \
             --set web.enabled=true \
+            --set web.apiBase=https://mcp.example.test \
             --set web.ingress.enabled=true \
             --set auth.token=ci-token \
             --set replicaCount=2 > /tmp/full.yaml

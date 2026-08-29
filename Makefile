@@ -63,7 +63,7 @@ dev: ## Vite dev server
 
 IMAGE ?= ohmywind-mcp:local
 WEB_IMAGE ?= ohmywind-web:local
-# Backend compiled into the web bundle.
+# Backend the web bundle calls, substituted at container start.
 WEB_API_BASE ?= http://localhost:7860
 CHART := deploy/helm/ohmywind-mcp
 
@@ -76,12 +76,12 @@ docker-run: ## Run the image locally on :7860
 	docker run --rm -p 7860:7860 -e 'OPENWIND_ALLOWED_HOSTS=localhost:*' $(IMAGE)
 
 .PHONY: docker-build-web
-docker-build-web: ## Build the web app image (nginx) with WEB_API_BASE compiled in
-	docker build -f deploy/docker/Dockerfile.web --build-arg VITE_API_BASE=$(WEB_API_BASE) -t $(WEB_IMAGE) .
+docker-build-web: ## Build the web app image (nginx, backend-agnostic)
+	docker build -f deploy/docker/Dockerfile.web -t $(WEB_IMAGE) .
 
 .PHONY: docker-run-web
-docker-run-web: ## Run the web image locally on :8080
-	docker run --rm -p 8080:8080 $(WEB_IMAGE)
+docker-run-web: ## Run the web image locally on :8080 against WEB_API_BASE
+	docker run --rm -p 8080:8080 -e API_BASE=$(WEB_API_BASE) $(WEB_IMAGE)
 
 .PHONY: helm-lint
 helm-lint: ## Lint + render the chart with every optional resource enabled
@@ -89,6 +89,7 @@ helm-lint: ## Lint + render the chart with every optional resource enabled
 	helm template ci $(CHART) --set edgeSecret.value=x --set atlas.enabled=true \
 		--set ingress.enabled=true --set autoscaling.enabled=true \
 		--set podDisruptionBudget.enabled=true --set web.enabled=true --set auth.token=x \
+		--set web.apiBase=https://mcp.example.test \
 		--set web.ingress.enabled=true > /dev/null
 
 .PHONY: mcp

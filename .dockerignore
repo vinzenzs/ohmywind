@@ -9,6 +9,7 @@
 !packages/hf-space/
 !packages/web/
 !deploy/docker/nginx.conf
+!deploy/docker/web-entrypoint.sh
 **/node_modules/
 **/dist/
 **/.venv/
