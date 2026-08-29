@@ -147,11 +147,13 @@ affinity: {}
 # ------------------------------------------------------------------ web app
 # The static React bundle (packages/web) behind nginx, from
 # deploy/docker/Dockerfile.web. Optional: the upstream deployment serves it
-# from Cloudflare Pages instead. The backend URL is compiled into the bundle
-# at image build time (VITE_API_BASE), so the image must have been built for
-# the MCP host this release exposes.
+# from Cloudflare Pages instead.
 web:
   enabled: false
+  # Public URL of the MCP/REST server the browser must call, substituted
+  # into the bundle when the pod starts. Required when enabled: typically
+  # https://<ingress.hosts[0].host>. Kept out of the image on purpose.
+  apiBase: ""
   replicaCount: 1
   image:
     repository: ghcr.io/qdonnars/ohmywind-web
@@ -189,6 +191,8 @@ web:
     runAsNonRoot: true
     runAsUser: 101
     runAsGroup: 101
+    # The entrypoint writes the bundle into the html emptyDir as uid 101.
+    fsGroup: 101
     seccompProfile:
       type: RuntimeDefault
   nodeSelector: {}

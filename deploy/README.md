@@ -32,18 +32,21 @@ Open-Meteo SMOC currents only (fine offshore, insufficient in narrow passes).
 ## Web app image
 
 The React bundle (`packages/web`) behind nginx, for deployments that do not
-use Cloudflare Pages. The backend URL is **compiled into the bundle** by Vite,
-so it is a build argument and the image is specific to one backend:
+use Cloudflare Pages. Vite compiles the backend URL into the bundle, so the
+image is built with a placeholder and `web-entrypoint.sh` substitutes the
+real URL from **`API_BASE`** at container start. The image is backend-agnostic
+and no hostname is ever baked into a published artefact; a container without
+`API_BASE` refuses to start. Under a read-only root filesystem, mount a
+writable `/usr/share/nginx/html` owned by uid 101 (the chart does; with
+docker: `--tmpfs /usr/share/nginx/html:uid=101,gid=101`).
 
 ```sh
-WEB_API_BASE=https://mcp.example.org make docker-build-web
-make docker-run-web          # http://localhost:8080
+make docker-build-web
+WEB_API_BASE=https://mcp.example.org make docker-run-web   # http://localhost:8080
 ```
 
 CI publishes `ghcr.io/<owner>/ohmywind-web` with the same tags as the server
-image, built against the repo Variable `WEB_API_BASE` (default
-`https://mcp.ohmywind.fr`) — set it on your fork to your own MCP host.
-`deploy/docker/nginx.conf` mirrors Cloudflare's `_headers`/`_redirects`
+image. `deploy/docker/nginx.conf` mirrors Cloudflare's `_headers`/`_redirects`
 (`sw.js` no-store, `/confidentialite` → 200, unknown paths → `404.html`);
 keep the three in sync. Runs as uid 101 on port 8080.
 
@@ -57,9 +60,9 @@ helm install ohmywind oci://ghcr.io/<owner>/charts/ohmywind-mcp --version 0.1.0 
 
 or from the checkout: `helm install ohmywind deploy/helm/ohmywind-mcp`.
 
-Add the web app with `--set web.enabled=true --set web.ingress.enabled=true
---set web.ingress.hosts[0].host=ohmywind.example.org` (image built for the
-MCP host you expose; the server's CORS policy already allows any origin).
+Add the web app with `--set web.enabled=true --set web.apiBase=https://mcp.example.org
+--set web.ingress.enabled=true --set web.ingress.hosts[0].host=ohmywind.example.org`
+(`web.apiBase` is required; the server's CORS policy already allows any origin).
 
 Notable values (`deploy/helm/ohmywind-mcp/values.yaml` is fully commented):
 

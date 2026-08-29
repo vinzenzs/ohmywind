@@ -1,4 +1,5 @@
 {{- if .Values.web.enabled -}}
+{{- $apiBase := required "web.apiBase is required when web.enabled: the public URL of the MCP server (e.g. https://mcp.example.org)" .Values.web.apiBase -}}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -36,6 +37,9 @@ spec:
           imagePullPolicy: {{ .Values.web.image.pullPolicy }}
           securityContext:
             {{- toYaml .Values.web.securityContext | nindent 12 }}
+          env:
+            - name: API_BASE
+              value: {{ $apiBase | quote }}
           ports:
             - name: http
               containerPort: 8080
@@ -52,17 +56,23 @@ spec:
             periodSeconds: 10
           resources:
             {{- toYaml .Values.web.resources | nindent 12 }}
-          # nginx-unprivileged writes its pid and buffers under these two
-          # paths; readOnlyRootFilesystem needs them backed by emptyDirs.
+          # readOnlyRootFilesystem: nginx-unprivileged writes its pid and
+          # buffers under /tmp and /var/cache/nginx, and the entrypoint
+          # materialises the bundle (with API_BASE substituted) into the
+          # document root.
           volumeMounts:
             - name: tmp
               mountPath: /tmp
             - name: cache
               mountPath: /var/cache/nginx
+            - name: html
+              mountPath: /usr/share/nginx/html
       volumes:
         - name: tmp
           emptyDir: {}
         - name: cache
+          emptyDir: {}
+        - name: html
           emptyDir: {}
       {{- with .Values.web.nodeSelector }}
       nodeSelector:

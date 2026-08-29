@@ -38,8 +38,8 @@ Web app: release {{ include "ohmywind-mcp.web.fullname" . }}
   https://{{ .host }}/
 {{- end }}
 {{- end }}
-The bundle calls the backend compiled into the image (VITE_API_BASE at
-build time): make sure it matches the MCP host above.
+The bundle calls {{ .Values.web.apiBase }} (web.apiBase): make sure it is
+the public URL of the MCP host above.
 {{- end }}
 
 {{- if not .Values.atlas.enabled }}
