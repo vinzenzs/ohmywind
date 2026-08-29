@@ -19,6 +19,29 @@ No ingress. Reach the service locally with:
 guard matches host:port, so add "localhost:*" there for port-forward use.
 {{- end }}
 
+{{- if include "ohmywind-mcp.apiTokenSecretName" . }}
+
+/mcp requires a bearer token: clients must send
+  Authorization: Bearer <token>
+(e.g. `claude mcp add --transport http ohmywind <url>/mcp --header "Authorization: Bearer <token>"`).
+{{- else }}
+
+/mcp is open to any caller. Set auth.token (or auth.existingSecret) to
+require a bearer token.
+{{- end }}
+
+{{- if .Values.web.enabled }}
+
+Web app: release {{ include "ohmywind-mcp.web.fullname" . }}
+{{- if .Values.web.ingress.enabled }}
+{{- range .Values.web.ingress.hosts }}
+  https://{{ .host }}/
+{{- end }}
+{{- end }}
+The bundle calls the backend compiled into the image (VITE_API_BASE at
+build time): make sure it matches the MCP host above.
+{{- end }}
+
 {{- if not .Values.atlas.enabled }}
 
 Tidal atlas is disabled: currents come from Open-Meteo SMOC only (8 km),

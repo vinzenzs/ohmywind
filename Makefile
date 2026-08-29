@@ -62,6 +62,9 @@ dev: ## Vite dev server
 # ---- container & chart (deploy/). Same steps as .github/workflows/container.yml.
 
 IMAGE ?= ohmywind-mcp:local
+WEB_IMAGE ?= ohmywind-web:local
+# Backend compiled into the web bundle.
+WEB_API_BASE ?= http://localhost:7860
 CHART := deploy/helm/ohmywind-mcp
 
 .PHONY: docker-build
@@ -72,12 +75,21 @@ docker-build: ## Build the generic server image from the repo root
 docker-run: ## Run the image locally on :7860
 	docker run --rm -p 7860:7860 -e 'OPENWIND_ALLOWED_HOSTS=localhost:*' $(IMAGE)
 
+.PHONY: docker-build-web
+docker-build-web: ## Build the web app image (nginx) with WEB_API_BASE compiled in
+	docker build -f deploy/docker/Dockerfile.web --build-arg VITE_API_BASE=$(WEB_API_BASE) -t $(WEB_IMAGE) .
+
+.PHONY: docker-run-web
+docker-run-web: ## Run the web image locally on :8080
+	docker run --rm -p 8080:8080 $(WEB_IMAGE)
+
 .PHONY: helm-lint
 helm-lint: ## Lint + render the chart with every optional resource enabled
 	helm lint --strict $(CHART)
 	helm template ci $(CHART) --set edgeSecret.value=x --set atlas.enabled=true \
 		--set ingress.enabled=true --set autoscaling.enabled=true \
-		--set podDisruptionBudget.enabled=true > /dev/null
+		--set podDisruptionBudget.enabled=true --set web.enabled=true --set auth.token=x \
+		--set web.ingress.enabled=true > /dev/null
 
 .PHONY: mcp
 mcp: ## Local MCP server over stdio, for a client on this machine

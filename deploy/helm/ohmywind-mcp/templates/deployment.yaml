@@ -15,7 +15,7 @@ spec:
   template:
     metadata:
       annotations:
-        {{- if and .Values.edgeSecret.value (not .Values.edgeSecret.existingSecret) }}
+        {{- if include "ohmywind-mcp.rendersSecret" . }}
         checksum/secret: {{ include (print $.Template.BasePath "/secret.yaml") . | sha256sum }}
         {{- end }}
         {{- with .Values.podAnnotations }}
@@ -64,6 +64,13 @@ spec:
                 secretKeyRef:
                   name: {{ . }}
                   key: OPENWIND_EDGE_SECRET
+            {{- end }}
+            {{- with (include "ohmywind-mcp.apiTokenSecretName" .) }}
+            - name: OPENWIND_API_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ . }}
+                  key: OPENWIND_API_TOKEN
             {{- end }}
             {{- with .Values.config.extraEnv }}
             {{- toYaml . | nindent 12 }}
