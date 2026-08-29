@@ -20,7 +20,27 @@ on:
         required: false
 
 jobs:
+  # Forks have no signing key for the fr.ohmywind namespace: without the
+  # secret the run is a green no-op rather than a failure on every tag.
+  preflight:
+    runs-on: ubuntu-latest
+    outputs:
+      enabled: ${{ steps.check.outputs.enabled }}
+    steps:
+      - id: check
+        env:
+          KEY: ${{ secrets.MCP_REGISTRY_PRIVATE_KEY }}
+        run: |
+          if [ -n "${KEY}" ]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::MCP_REGISTRY_PRIVATE_KEY secret is not set, skipping the MCP Registry publish."
+          fi
+
   publish:
+    needs: preflight
+    if: needs.preflight.outputs.enabled == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
