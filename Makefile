@@ -59,6 +59,26 @@ check: lint test build ## Everything CI runs, in one command
 dev: ## Vite dev server
 	cd $(WEB) && npm run dev
 
+# ---- container & chart (deploy/). Same steps as .github/workflows/container.yml.
+
+IMAGE ?= ohmywind-mcp:local
+CHART := deploy/helm/ohmywind-mcp
+
+.PHONY: docker-build
+docker-build: ## Build the generic server image from the repo root
+	docker build -f deploy/docker/Dockerfile -t $(IMAGE) .
+
+.PHONY: docker-run
+docker-run: ## Run the image locally on :7860
+	docker run --rm -p 7860:7860 -e 'OPENWIND_ALLOWED_HOSTS=localhost:*' $(IMAGE)
+
+.PHONY: helm-lint
+helm-lint: ## Lint + render the chart with every optional resource enabled
+	helm lint --strict $(CHART)
+	helm template ci $(CHART) --set edgeSecret.value=x --set atlas.enabled=true \
+		--set ingress.enabled=true --set autoscaling.enabled=true \
+		--set podDisruptionBudget.enabled=true > /dev/null
+
 .PHONY: mcp
 mcp: ## Local MCP server over stdio, for a client on this machine
 	cd packages/mcp-core && uv run python scripts/run_local.py

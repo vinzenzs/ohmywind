@@ -489,6 +489,17 @@ async def _index(_request) -> HTMLResponse:
     return HTMLResponse(LANDING_HTML)
 
 
+async def _healthz(_request) -> JSONResponse:
+    """Liveness/readiness probe target for container orchestrators.
+
+    Deliberately trivial: it answers as soon as the ASGI app is serving, and
+    it is neither rate-limited (only the POST routes are) nor served from the
+    landing page, so a probe every few seconds costs nothing and never
+    competes with a real caller's budget.
+    """
+    return JSONResponse({"status": "ok"}, headers={"Cache-Control": "no-store"})
+
+
 # Connector pickers in chat hosts (Claude, etc.) often scrape the server
 # URL's favicon / og:image to badge the connector. Our app responded 404
 # on /favicon.ico and the host fell back to HuggingFace branding. Redirect
@@ -1051,6 +1062,7 @@ def build_app(mcp_app: Any) -> Starlette:
     return Starlette(
         routes=[
             Route("/", _index),
+            Route("/healthz", _healthz, methods=["GET"]),
             *[Route(path, _icon_redirect, methods=["GET"]) for path in _ICON_REDIRECTS],
             Route("/static/{asset}", _static_asset, methods=["GET"]),
             Route("/api/v1/archetypes", _api_archetypes, methods=["GET"]),
