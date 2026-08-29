@@ -1,0 +1,135 @@
+# Default values for ohmywind-mcp.
+
+replicaCount: 1
+
+image:
+  repository: ghcr.io/qdonnars/ohmywind-mcp
+  pullPolicy: IfNotPresent
+  # Defaults to the chart's appVersion.
+  tag: ""
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+# Server configuration, surfaced 1:1 as environment variables read by
+# packages/hf-space/app.py and security.py.
+config:
+  # Host headers accepted on /mcp by FastMCP's DNS-rebinding protection;
+  # anything else answers 421. Matched as host:port ("localhost:*" for a
+  # wildcard port). Add every hostname MCP clients will use. The REST routes
+  # and /healthz are not guarded, so probes work regardless.
+  allowedHosts:
+    - mcp.ohmywind.fr
+  # Number of trusted proxy hops in X-Forwarded-For (ingress controller = 1,
+  # add one per extra layer such as a CDN in front of the ingress).
+  trustedProxyHops: 1
+  rateLimit:
+    requests: 30
+    windowSeconds: 60
+    maxTrackedIps: 5000
+  # CSP frame-ancestors. Nothing frames the landing page outside HF.
+  frameAncestors: "'none'"
+  # Free-form extra environment variables.
+  extraEnv: []
+  #  - name: OPENWIND_ALLOWED_ORIGINS
+  #    value: https://ohmywind.fr
+
+# Shared secret the edge proxy (packages/edge-proxy) presents; requests that
+# carry it are trusted as coming through the edge. Leave both empty to run
+# without an edge (the server logs a warning at boot and treats every caller
+# as direct).
+edgeSecret:
+  value: ""
+  # Name of an existing Secret with key OPENWIND_EDGE_SECRET; takes precedence
+  # over .value.
+  existingSecret: ""
+
+# Tidal atlas dataset (MARC PREVIMER + SHOM C2D), mounted at /data/atlas.
+# Private and not redistributable, so it is never in the image: provide it
+# through a PVC you populate yourself. Disabled = Open-Meteo SMOC only.
+atlas:
+  enabled: false
+  existingClaim: ""
+  # Used only when existingClaim is empty and enabled is true.
+  storageClassName: ""
+  accessModes: [ReadOnlyMany]
+  size: 2Gi
+
+serviceAccount:
+  create: true
+  automount: false
+  annotations: {}
+  name: ""
+
+podAnnotations: {}
+podLabels: {}
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 10001
+  runAsGroup: 10001
+  fsGroup: 10001
+  seccompProfile:
+    type: RuntimeDefault
+
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop: [ALL]
+
+service:
+  type: ClusterIP
+  port: 80
+
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  #  cert-manager.io/cluster-issuer: letsencrypt
+  hosts:
+    - host: mcp.ohmywind.fr
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
+  #  - secretName: ohmywind-mcp-tls
+  #    hosts: [mcp.ohmywind.fr]
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 256Mi
+  limits:
+    memory: 1Gi
+
+# Streamable-HTTP MCP sessions are held in memory by the pod that opened
+# them. Above one replica, the ingress must pin a client to a pod (cookie or
+# consistent-hash session affinity) or sessions break mid-conversation.
+autoscaling:
+  enabled: false
+  minReplicas: 1
+  maxReplicas: 4
+  targetCPUUtilizationPercentage: 80
+
+podDisruptionBudget:
+  enabled: false
+  minAvailable: 1
+
+livenessProbe:
+  httpGet:
+    path: /healthz
+    port: http
+  initialDelaySeconds: 10
+  periodSeconds: 20
+readinessProbe:
+  httpGet:
+    path: /healthz
+    port: http
+  initialDelaySeconds: 5
+  periodSeconds: 10
+
+nodeSelector: {}
+tolerations: []
+affinity: {}

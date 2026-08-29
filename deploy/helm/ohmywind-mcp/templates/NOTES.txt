@@ -1,0 +1,31 @@
+OhMyWind MCP is deploying as release {{ .Release.Name }} in {{ .Release.Namespace }}.
+
+Endpoints once ready:
+  MCP (streamable-http):  /mcp
+  REST:                   /api/v1/passage, /api/v1/passage-by-eta, /api/v1/archetypes
+  Probe:                  /healthz
+
+{{- if .Values.ingress.enabled }}
+{{- range .Values.ingress.hosts }}
+  https://{{ .host }}/mcp
+{{- end }}
+{{- else }}
+
+No ingress. Reach the service locally with:
+  kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "ohmywind-mcp.fullname" . }} 7860:{{ .Values.service.port }}
+  curl http://127.0.0.1:7860/healthz
+
+/mcp rejects any Host header not listed in config.allowedHosts (421); the
+guard matches host:port, so add "localhost:*" there for port-forward use.
+{{- end }}
+
+{{- if not .Values.atlas.enabled }}
+
+Tidal atlas is disabled: currents come from Open-Meteo SMOC only (8 km),
+which is insufficient for narrow Atlantic passes. See values `atlas`.
+{{- end }}
+{{- if and (gt (int .Values.replicaCount) 1) (not .Values.autoscaling.enabled) }}
+
+replicaCount > 1: MCP sessions are pod-local. Configure session affinity on
+your ingress or clients will lose their session between requests.
+{{- end }}

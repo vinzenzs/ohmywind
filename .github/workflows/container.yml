@@ -1,0 +1,184 @@
+name: Container & Helm chart
+
+# Builds the generic OCI image (deploy/docker/Dockerfile) and validates the
+# Helm chart (deploy/helm/ohmywind-mcp) on every change that can affect them.
+# Publishing follows the same branch → environment mapping as the rest of the
+# repo (CLAUDE.md): main → `latest`, dev → `dev`, tags v* → semver. Pull
+# requests build and smoke-test but never push.
+#
+# The chart is published as an OCI artefact next to the image
+# (oci://ghcr.io/<owner>/charts/ohmywind-mcp) on release tags only: a chart
+# version is a deliberate cut, not every commit.
+on:
+  pull_request:
+    paths:
+      - "packages/hf-space/**"
+      - "packages/mcp-core/**"
+      - "packages/data-adapters/**"
+      - "deploy/**"
+      - ".dockerignore"
+      - ".github/workflows/container.yml"
+  push:
+    branches: [main, dev]
+    paths:
+      - "packages/hf-space/**"
+      - "packages/mcp-core/**"
+      - "packages/data-adapters/**"
+      - "deploy/**"
+      - ".dockerignore"
+      - ".github/workflows/container.yml"
+    tags: ["v*"]
+  workflow_dispatch:
+
+concurrency:
+  group: container-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  IMAGE: ghcr.io/${{ github.repository_owner }}/ohmywind-mcp
+  CHART_DIR: deploy/helm/ohmywind-mcp
+
+jobs:
+  image:
+    name: Image
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      version: ${{ steps.meta.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Login to GHCR
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Image metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE }}
+          # main → latest, dev → dev, v1.2.3 → 1.2.3 + 1.2, every push → sha-<short>.
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      # Single-arch build loaded into the local daemon so it can actually be
+      # started. The multi-arch push below reuses every layer from the cache.
+      - name: Build (amd64, for smoke test)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deploy/docker/Dockerfile
+          load: true
+          tags: ohmywind-mcp:smoke
+          build-args: |
+            VERSION=${{ steps.meta.outputs.version }}
+            VCS_REF=${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # Boots the server under the chart's security posture (read-only root,
+      # non-root) and hits /healthz, the REST catalogue and an MCP initialize.
+      # Catches the class of bug where a COPY is missing or a dependency
+      # drifted: the image builds fine and crashes at import time. The MCP
+      # host guard matches host:port, hence the `localhost:*` allow-list.
+      - name: Smoke test
+        run: |
+          set -euo pipefail
+          docker run -d --name smoke --read-only --tmpfs /tmp -p 7860:7860 \
+            -e 'OPENWIND_ALLOWED_HOSTS=localhost:*' ohmywind-mcp:smoke
+          for i in $(seq 1 30); do
+            if curl -fsS http://localhost:7860/healthz >/dev/null 2>&1; then break; fi
+            sleep 1
+          done
+          curl -fsS http://localhost:7860/healthz
+          curl -fsS http://localhost:7860/api/v1/archetypes | head -c 300; echo
+          curl -fsS -X POST http://localhost:7860/mcp \
+            -H 'Content-Type: application/json' \
+            -H 'Accept: application/json, text/event-stream' \
+            -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"smoke","version":"0"}}}' \
+            | head -c 300; echo
+          # Runs as the unprivileged user from the Dockerfile.
+          [ "$(docker exec smoke id -u)" = "10001" ]
+          docker logs smoke
+          docker rm -f smoke
+
+      - name: Build and push (multi-arch)
+        if: github.event_name != 'pull_request'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deploy/docker/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            VERSION=${{ steps.meta.outputs.version }}
+            VCS_REF=${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  chart:
+    name: Helm chart
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: azure/setup-helm@v4
+        with:
+          version: v3.16.4
+
+      - name: Lint
+        run: helm lint --strict "$CHART_DIR"
+
+      # Renders every optional resource so a broken conditional block does not
+      # hide behind the defaults, then checks the manifests against the
+      # Kubernetes schemas.
+      - name: Template (defaults + every feature on)
+        run: |
+          set -euo pipefail
+          helm template ci "$CHART_DIR" > /tmp/default.yaml
+          helm template ci "$CHART_DIR" \
+            --set edgeSecret.value=ci-secret \
+            --set atlas.enabled=true \
+            --set ingress.enabled=true \
+            --set autoscaling.enabled=true \
+            --set podDisruptionBudget.enabled=true \
+            --set replicaCount=2 > /tmp/full.yaml
+          wc -l /tmp/default.yaml /tmp/full.yaml
+
+      - name: Validate against Kubernetes schemas
+        run: |
+          set -euo pipefail
+          KUBECONFORM=v0.6.7
+          curl -fsSL "https://github.com/yannh/kubeconform/releases/download/${KUBECONFORM}/kubeconform-linux-amd64.tar.gz" \
+            | tar xz -C /usr/local/bin kubeconform
+          kubeconform -strict -summary -kubernetes-version 1.30.0 /tmp/default.yaml /tmp/full.yaml
+
+      - name: Package and push chart
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          VERSION="${GITHUB_REF_NAME#v}"
+          echo "$GH_TOKEN" | helm registry login ghcr.io -u "${{ github.actor }}" --password-stdin
+          helm package "$CHART_DIR" --version "$VERSION" --app-version "$VERSION" -d /tmp/chart
+          helm push /tmp/chart/ohmywind-mcp-"$VERSION".tgz "oci://ghcr.io/${{ github.repository_owner }}/charts"

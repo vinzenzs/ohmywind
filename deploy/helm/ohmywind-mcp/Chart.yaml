@@ -1,0 +1,16 @@
+apiVersion: v2
+name: ohmywind-mcp
+description: OhMyWind MCP server and REST API — open-source sailing passage planner.
+type: application
+# Chart version: bump on any change to the templates or default values.
+version: 0.1.0
+# Image tag used when .Values.image.tag is empty. CI overrides it with the
+# release tag via `helm package --app-version`.
+appVersion: "0.1.0"
+home: https://ohmywind.fr
+sources:
+  - https://github.com/qdonnars/ohmywind
+keywords: [mcp, sailing, weather, marine]
+maintainers:
+  - name: OhMyWind
+    url: https://ohmywind.fr

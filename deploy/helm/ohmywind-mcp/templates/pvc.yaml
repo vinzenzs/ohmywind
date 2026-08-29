@@ -1,0 +1,17 @@
+{{- if and .Values.atlas.enabled (not .Values.atlas.existingClaim) -}}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "ohmywind-mcp.atlasClaimName" . }}
+  labels:
+    {{- include "ohmywind-mcp.labels" . | nindent 4 }}
+spec:
+  accessModes:
+    {{- toYaml .Values.atlas.accessModes | nindent 4 }}
+  {{- with .Values.atlas.storageClassName }}
+  storageClassName: {{ . | quote }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ .Values.atlas.size }}
+{{- end }}

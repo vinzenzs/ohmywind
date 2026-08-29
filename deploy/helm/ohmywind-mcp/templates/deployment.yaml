@@ -1,0 +1,124 @@
+{{- $probeHost := first .Values.config.allowedHosts -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "ohmywind-mcp.fullname" . }}
+  labels:
+    {{- include "ohmywind-mcp.labels" . | nindent 4 }}
+spec:
+  {{- if not .Values.autoscaling.enabled }}
+  replicas: {{ .Values.replicaCount }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "ohmywind-mcp.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      annotations:
+        {{- if and .Values.edgeSecret.value (not .Values.edgeSecret.existingSecret) }}
+        checksum/secret: {{ include (print $.Template.BasePath "/secret.yaml") . | sha256sum }}
+        {{- end }}
+        {{- with .Values.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      labels:
+        {{- include "ohmywind-mcp.selectorLabels" . | nindent 8 }}
+        {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "ohmywind-mcp.serviceAccountName" . }}
+      automountServiceAccountToken: {{ .Values.serviceAccount.automount }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: mcp
+          image: "{{ .Values.image.repository }}:{{ include "ohmywind-mcp.imageTag" . }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          ports:
+            - name: http
+              containerPort: 7860
+              protocol: TCP
+          env:
+            - name: OPENWIND_ALLOWED_HOSTS
+              value: {{ join "," .Values.config.allowedHosts | quote }}
+            - name: OPENWIND_TRUSTED_PROXY_HOPS
+              value: {{ .Values.config.trustedProxyHops | quote }}
+            - name: OPENWIND_RATE_LIMIT_REQUESTS
+              value: {{ .Values.config.rateLimit.requests | quote }}
+            - name: OPENWIND_RATE_LIMIT_WINDOW_S
+              value: {{ .Values.config.rateLimit.windowSeconds | quote }}
+            - name: OPENWIND_RATE_LIMIT_MAX_IPS
+              value: {{ .Values.config.rateLimit.maxTrackedIps | quote }}
+            - name: OPENWIND_FRAME_ANCESTORS
+              value: {{ .Values.config.frameAncestors | quote }}
+            {{- with (include "ohmywind-mcp.edgeSecretName" .) }}
+            - name: OPENWIND_EDGE_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ . }}
+                  key: OPENWIND_EDGE_SECRET
+            {{- end }}
+            {{- with .Values.config.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          {{- with .Values.livenessProbe }}
+          livenessProbe:
+            {{- toYaml (omit . "httpGet") | nindent 12 }}
+            {{- if .httpGet }}
+            httpGet:
+              {{- toYaml .httpGet | nindent 14 }}
+              httpHeaders:
+                - name: Host
+                  value: {{ $probeHost | quote }}
+            {{- end }}
+          {{- end }}
+          {{- with .Values.readinessProbe }}
+          readinessProbe:
+            {{- toYaml (omit . "httpGet") | nindent 12 }}
+            {{- if .httpGet }}
+            httpGet:
+              {{- toYaml .httpGet | nindent 14 }}
+              httpHeaders:
+                - name: Host
+                  value: {{ $probeHost | quote }}
+            {{- end }}
+          {{- end }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            {{- if .Values.atlas.enabled }}
+            - name: atlas
+              mountPath: /data/atlas
+              readOnly: true
+            {{- end }}
+      volumes:
+        # readOnlyRootFilesystem: Python and httpx still want a writable /tmp.
+        - name: tmp
+          emptyDir: {}
+        {{- if .Values.atlas.enabled }}
+        - name: atlas
+          persistentVolumeClaim:
+            claimName: {{ include "ohmywind-mcp.atlasClaimName" . }}
+            readOnly: true
+        {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
